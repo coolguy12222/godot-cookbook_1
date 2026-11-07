@@ -345,6 +345,103 @@ Object.assign(DEMOS,{
   const ms=1/p.zoom_out; view(mx0,my0,mw,mh,ms,true); c.strokeStyle="#000"; c.lineWidth=3; c.strokeRect(mx0,my0,mw,mh);
   lbl(c,`zoom = 1/${p.zoom_out}`,mx0+4,my0+mh+8,K.ink); }
 });
+function tdGround(c,w,h){ c.fillStyle="#86c96a"; c.fillRect(0,0,w,h); c.fillStyle="#73b558"; for(let x=5;x<w;x+=17)for(let y=5;y<h;y+=17) if(rnd(x*13+y*7)>0.62) c.fillRect(x,y,3,3); }
+function tdDir(f){ return Math.abs(f[0])>Math.abs(f[1])?(f[0]>0?"right":"left"):(f[1]>0?"down":"up"); }
+function tdHero(c,x,y,f,t,col){ const bob=t?-Math.abs(Math.sin(t*12))*3:0, sw=t?Math.sin(t*12)*3:0;
+  c.fillStyle="#00000033"; c.beginPath(); c.ellipse(x,y+11,11,4,0,0,TAU); c.fill();
+  c.fillStyle="#3a2c2c"; c.fillRect(x-7,y+4+sw,5,6); c.fillRect(x+2,y+4-sw,5,6);
+  circ(c,x,y-2+bob,10,col); circ(c,x,y-14+bob,8,"#f4c9a0");
+  if(f==="up") circ(c,x,y-15+bob,8,"#5a3a22"); else { c.fillStyle="#5a3a22"; c.beginPath(); c.arc(x,y-16+bob,8,Math.PI,0); c.fill(); }
+  c.fillStyle="#1b1830"; const ey=y-13+bob;
+  if(f==="down"){ c.fillRect(x-4,ey,2,3); c.fillRect(x+2,ey,2,3); } else if(f==="left") c.fillRect(x-6,ey,2,3); else if(f==="right") c.fillRect(x+4,ey,2,3); }
+Object.assign(DEMOS,{
+"Grid movement (tile-based)":(c,w,h,t,K,st,p)=>{ const dt=step(st,t), T=Math.max(12,p.tile_size*1.5), cols=Math.max(4,Math.floor(w/T)), rows=Math.max(3,Math.floor((h-20)/T)), ox=(w-cols*T)/2, oy=20+(h-20-rows*T)/2;
+  const s=st.s||(st.s={}); if(s.T!==T){ Object.assign(s,{T,cx:1,cy:1,fx:1,fy:1,a:1,blk:-9,next:0,flip:false}); }
+  const wall=(x,y)=>x<0||y<0||x>=cols||y>=rows||(!(x<=2&&y<=2)&&rnd(x*31+y*17+7)<0.2);
+  tdGround(c,w,h); c.strokeStyle="#00000022"; c.lineWidth=1;
+  for(let x=0;x<=cols;x++){ c.beginPath(); c.moveTo(ox+x*T,oy); c.lineTo(ox+x*T,oy+rows*T); c.stroke(); }
+  for(let y=0;y<=rows;y++){ c.beginPath(); c.moveTo(ox,oy+y*T); c.lineTo(ox+cols*T,oy+y*T); c.stroke(); }
+  for(let x=0;x<cols;x++) for(let y=0;y<rows;y++) if(wall(x,y)) spr(c,"crate",ox+(x+.5)*T,oy+(y+1)*T,false,T/24);
+  s.a=Math.min(1,s.a+dt/Math.max(0.01,p.move_time));
+  if(s.a>=1){ let d=null;
+    if(manual(st,t)){ if(key(st,"ArrowRight","d")) d=[1,0]; else if(key(st,"ArrowLeft","a")) d=[-1,0]; else if(key(st,"ArrowDown","s")) d=[0,1]; else if(key(st,"ArrowUp","w")) d=[0,-1]; }
+    else if(t>=s.next){ d=[[1,0],[-1,0],[0,1],[0,-1]][Math.floor(Math.random()*4)]; s.next=t+0.2; }
+    if(d){ if(d[0]) s.flip=d[0]<0; const nx=s.cx+d[0], ny=s.cy+d[1];
+      if(wall(nx,ny)){ s.blk=t; s.bx=nx; s.by=ny; } else { s.fx=s.cx; s.fy=s.cy; s.cx=nx; s.cy=ny; s.a=0; } } }
+  const blocked=t-s.blk<0.3; if(blocked){ c.strokeStyle=K.k; c.lineWidth=3; c.strokeRect(ox+s.bx*T,oy+s.by*T,T,T); }
+  spr(c,s.a<1?walk(t):"p0",ox+(s.fx+(s.cx-s.fx)*s.a+0.5)*T,oy+(s.fy+(s.cy-s.fy)*s.a+1)*T,s.flip,T/24);
+  lbl(c,blocked?"ray.is_colliding() → blocked":(s.a<1?"moving = true":"moving = false"),10,10,blocked?K.k:K.ink); lbl(c,`tile (${s.cx}, ${s.cy})`,w-10,10,K.ink,"right"); },
+"4-direction animation (facing)":(c,w,h,t,K,st,p)=>{ const dt=step(st,t), s=st.s||(st.s={x:w/2,y:h/2,f:"down"}); let ix=0, iy=0;
+  if(manual(st,t)){ ix=(key(st,"ArrowRight","d")?1:0)-(key(st,"ArrowLeft","a")?1:0); iy=(key(st,"ArrowDown","s")?1:0)-(key(st,"ArrowUp","w")?1:0); }
+  else { const ph=t%6.6; if(ph<1.2) ix=1; else if(ph<2.4) iy=1; else if(ph<3.3){} else if(ph<4.5) ix=-1; else if(ph<5.7) iy=-1; }
+  const m=Math.hypot(ix,iy); if(m>1){ ix/=m; iy/=m; }
+  s.x=clamp(s.x+ix*p.speed*0.6*dt,20,w-20); s.y=clamp(s.y+iy*p.speed*0.6*dt,40,h-20);
+  if(m) s.f=Math.abs(ix)>Math.abs(iy)?(ix>0?"right":"left"):(iy>0?"down":"up");
+  tdGround(c,w,h); tdHero(c,s.x,s.y,s.f,m?t:0,"#4a7bd0");
+  const cx=w-34, cy=h-34; [["up",0,-1,"▲"],["down",0,1,"▼"],["left",-1,0,"◀"],["right",1,0,"▶"]].forEach(([n,dx,dy,g])=>{ const on=n===s.f; box(c,cx+dx*20-9,cy+dy*20-9,18,18,on?K.acc:"#ffffff99"); lbl(c,g,cx+dx*20,cy+dy*20+1,K.ink,"center"); });
+  lbl(c,`anim.play("${m?"walk_":"idle_"}${s.f}")`,10,12,K.ink); },
+"Melee sword attack (hitbox)":(c,w,h,t,K,st,p)=>{ const dt=step(st,t), px=w*0.42, py=h/2+10, s=st.s||(st.s={ea:0,hp:100,atk:-9,face:[1,0],hitT:-9,kb:0});
+  s.ea+=dt*0.7; s.kb=Math.max(0,s.kb-dt*90); const er=62+s.kb, ex=px+Math.cos(s.ea)*er, ey=py+Math.sin(s.ea)*er*0.6;
+  let want=clicked(st)>0; if(!want && auto(st,t,0.9)) want=true;
+  const tx=st.mouse?st.mouse.x:ex, ty=st.mouse?st.mouse.y:ey;
+  if(want && t-s.atk>p.attack_time){ const dx=tx-px, dy=ty-py, d=Math.hypot(dx,dy)||1; s.face=[dx/d,dy/d]; s.atk=t; s.done=false; }
+  const swing=t-s.atk<p.attack_time, reach=p.hitbox_offset*1.4, hx=px+s.face[0]*reach, hy=py-4+s.face[1]*reach, hr=16;
+  if(swing && !s.done && Math.hypot(ex-hx,ey-hy)<hr+12){ s.done=true; s.hp-=p.attack_damage; s.hitT=t; s.kb=36; if(s.hp<=0) s.hp=100; }
+  tdGround(c,w,h);
+  c.globalAlpha=t-s.hitT<0.15?0.4:1; spr(c,spiky(t),ex,ey+12,ex>px); c.globalAlpha=1;
+  box(c,ex-14,ey-20,28,4,"#00000055"); box(c,ex-14,ey-20,28*s.hp/100,4,K.k);
+  if(t-s.hitT<0.5) lbl(c,`-${p.attack_damage}`,ex,ey-30-(t-s.hitT)*30,K.k,"center");
+  tdHero(c,px,py,tdDir(s.face),0,"#4a7bd0");
+  if(swing){ const a=Math.atan2(s.face[1],s.face[0]), pr=(t-s.atk)/p.attack_time; c.strokeStyle="#ffffff"; c.lineWidth=4; c.beginPath(); c.arc(px,py-4,reach+6,a-1.1+pr*2.2-0.5,a-1.1+pr*2.2+0.1); c.stroke();
+    c.strokeStyle=K.k; c.lineWidth=1.5; c.setLineDash([3,3]); c.beginPath(); c.arc(hx,hy,hr,0,TAU); c.stroke(); c.setLineDash([]); }
+  lbl(c,swing?"hitbox_shape.disabled = false":"hitbox_shape.disabled = true",10,12,swing?K.k:K.ink); },
+"Pathfinding (NavigationAgent2D)":(c,w,h,t,K,st,p)=>{ const dt=step(st,t), T=20, cols=Math.max(9,Math.floor(w/T)), rows=Math.max(5,Math.floor((h-18)/T)), ox=(w-cols*T)/2, oy=18;
+  const s=st.s||(st.s={}); if(s.cols!==cols||s.rows!==rows){ Object.assign(s,{cols,rows,ex:ox+T*1.5,ey:oy+T*1.5,path:[],rep:0,gx:cols-2,gy:rows-2}); }
+  const w1=Math.floor(cols*0.33), w2=Math.floor(cols*0.66);
+  const wall=(x,y)=>x<0||y<0||x>=cols||y>=rows||(x===w1&&y!==rows-2)||(x===w2&&y!==1);
+  if(st.mouse){ const mx=clamp(Math.floor((st.mouse.x-ox)/T),0,cols-1), my=clamp(Math.floor((st.mouse.y-oy)/T),0,rows-1); if(!wall(mx,my)){ s.gx=mx; s.gy=my; } }
+  else { const k=Math.floor(t/7)%2; s.gx=k?1:cols-2; s.gy=k?1:rows-2; }
+  s.rep-=dt; if(s.rep<=0){ s.rep=p.repath_time;
+    const ex=clamp(Math.floor((s.ex-ox)/T),0,cols-1), ey=clamp(Math.floor((s.ey-oy)/T),0,rows-1), prev=new Map([[ex+","+ey,null]]), q=[[ex,ey]];
+    while(q.length){ const [x,y]=q.shift(); if(x===s.gx&&y===s.gy) break; for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){ const nx=x+dx, ny=y+dy, k=nx+","+ny; if(!wall(nx,ny)&&!prev.has(k)){ prev.set(k,[x,y]); q.push([nx,ny]); } } }
+    const path=[]; let cur=prev.has(s.gx+","+s.gy)?[s.gx,s.gy]:null; while(cur){ path.unshift(cur); cur=prev.get(cur[0]+","+cur[1]); }
+    path.shift(); s.path=path.map(([x,y])=>[ox+(x+.5)*T,oy+(y+.5)*T]); }
+  let rem=p.speed*0.6*dt; const bx=s.ex;
+  while(rem>0&&s.path.length){ const [nx,ny]=s.path[0], dx=nx-s.ex, dy=ny-s.ey, d=Math.hypot(dx,dy); if(d<=rem){ s.ex=nx; s.ey=ny; rem-=d; s.path.shift(); } else { s.ex+=dx/d*rem; s.ey+=dy/d*rem; rem=0; } }
+  if(s.ex!==bx) s.flip=s.ex<bx;
+  tdGround(c,w,h);
+  for(let x=0;x<cols;x++) for(let y=0;y<rows;y++) if(wall(x,y)) spr(c,"crate",ox+(x+.5)*T,oy+(y+1)*T,false,T/24);
+  s.path.forEach(([x,y],i)=>circ(c,x,y,i===0?4:2.5,i===0?K.k:"#ffffffcc"));
+  spr(c,"p0",ox+(s.gx+.5)*T,oy+(s.gy+1)*T+2);
+  spr(c,s.path.length?spiky(t):"e0",s.ex,s.ey+12,!s.flip);
+  lbl(c,s.path.length?"agent.get_next_path_position()":"is_navigation_finished()",10,9,K.ink); lbl(c,`repath every ${p.repath_time}s`,w-10,9,K.ink,"right"); },
+"Y-sort (walk behind objects)":(c,w,h,t,K,st,p)=>{ const s=st.s||(st.s={on:true}); if(clicked(st)) s.on=!s.on; else if(auto(st,t,5)) s.on=!s.on;
+  tdGround(c,w,h); const tx=w/2, ty=h*0.66, sc=2.2, half=12*sc, sortY=ty-(16-p.foot_offset)/16*half;
+  const a=t*1.1, px=tx+Math.cos(a)*Math.min(90,w*0.3), py=ty-8+Math.sin(a)*36;
+  const tree=()=>spr(c,"tree",tx,ty,false,sc), hero=()=>tdHero(c,px,py-11,Math.cos(a+Math.PI/2)>0?"right":"left",t,"#4a7bd0");
+  const behind=s.on && py<sortY;
+  if(behind){ hero(); tree(); } else { tree(); hero(); }
+  c.strokeStyle=K.k; c.lineWidth=1.5; c.setLineDash([4,3]); c.beginPath(); c.moveTo(tx-34,sortY); c.lineTo(tx+34,sortY); c.stroke(); c.setLineDash([]);
+  lbl(c,"sort point",tx+38,sortY,K.k);
+  lbl(c,`y_sort_enabled = ${s.on}`,10,12,s.on?K.f:K.k); lbl(c,!s.on?"player always on top":(behind?"player behind tree":"player in front"),w-10,12,K.ink,"right"); },
+"Twin-stick shooter player":(c,w,h,t,K,st,p)=>{ const dt=step(st,t), s=st.s||(st.s={x:w*0.3,y:h/2,b:[],cd:0,hits:0,hitT:-9}); let ix=0, iy=0;
+  if(manual(st,t)){ ix=(key(st,"ArrowRight","d")?1:0)-(key(st,"ArrowLeft","a")?1:0); iy=(key(st,"ArrowDown","s")?1:0)-(key(st,"ArrowUp","w")?1:0); } else { ix=Math.cos(t*0.7); iy=Math.sin(t*1.1); }
+  const m=Math.hypot(ix,iy); if(m>1){ ix/=m; iy/=m; }
+  s.x=clamp(s.x+ix*p.speed*0.5*dt,16,w-16); s.y=clamp(s.y+iy*p.speed*0.5*dt,30,h-16);
+  const gx=w*0.74+Math.cos(t*0.9)*w*0.17, gy=h*0.5+Math.sin(t*1.7)*h*0.28;
+  const ax=st.mouse?st.mouse.x:gx, ay=st.mouse?st.mouse.y:gy, a=Math.atan2(ay-s.y,ax-s.x);
+  const firing=st.mouse?!!st.down:true; s.cd-=dt;
+  if(firing&&s.cd<=0){ s.cd=p.fire_rate; s.b.push({x:s.x+Math.cos(a)*20,y:s.y-4+Math.sin(a)*20,vx:Math.cos(a)*380,vy:Math.sin(a)*380}); }
+  s.b.forEach(b=>{ b.x+=b.vx*dt; b.y+=b.vy*dt; if(Math.hypot(b.x-gx,b.y-gy)<14){ b.dead=1; s.hits++; s.hitT=t; } });
+  s.b=s.b.filter(b=>!b.dead&&b.x>-10&&b.x<w+10&&b.y>-10&&b.y<h+10);
+  tdGround(c,w,h);
+  c.globalAlpha=t-s.hitT<0.1?0.35:1; spr(c,bat(t),gx,gy+12); c.globalAlpha=1;
+  s.b.forEach(b=>circ(c,b.x,b.y,3,K.s));
+  tdHero(c,s.x,s.y,tdDir([Math.cos(a),Math.sin(a)]),m>0.1?t:0,"#c94f7c");
+  c.save(); c.translate(s.x,s.y-4); c.rotate(a); box(c,8,-3,16,6,"#2b2b33"); c.restore();
+  if(st.mouse){ c.strokeStyle=K.ink; c.lineWidth=1.5; c.beginPath(); c.arc(ax,ay,7,0,TAU); c.moveTo(ax-11,ay); c.lineTo(ax+11,ay); c.moveTo(ax,ay-11); c.lineTo(ax,ay+11); c.stroke(); }
+  lbl(c,firing?"shoot held → fires every fire_rate":"hold the mouse to shoot",10,12,K.ink); lbl(c,`hits: ${s.hits}`,w-10,12,K.ink,"right"); }
+});
 const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const visible = new Set(), states = new WeakMap();
 const stOf = cv => { if(!states.has(cv)) states.set(cv,{keys:new Set(),clicks:0}); return states.get(cv); };
@@ -357,8 +454,9 @@ function draw(cv,t,K){ K=K||C(); const dpr=Math.min(2,devicePixelRatio||1), w=cv
 function wire(cv){ const st=stOf(cv);
   const pos=e=>{ const r=cv.getBoundingClientRect(); return {x:e.clientX-r.left,y:e.clientY-r.top}; };
   cv.addEventListener("pointermove",e=>{ st.mouse=pos(e); });
-  cv.addEventListener("pointerleave",()=>{ st.mouse=null; });
-  cv.addEventListener("pointerdown",e=>{ st.clicks++; st.clickT=now(); if(e.pointerType!=="mouse") st.mouse=pos(e); cv.focus({preventScroll:true}); });
+  cv.addEventListener("pointerleave",()=>{ st.mouse=null; st.down=false; });
+  cv.addEventListener("pointerup",()=>{ st.down=false; });
+  cv.addEventListener("pointerdown",e=>{ st.down=true; st.clicks++; st.clickT=now(); if(e.pointerType!=="mouse") st.mouse=pos(e); cv.focus({preventScroll:true}); });
   cv.addEventListener("keydown",e=>{ st.anyKey=e.key; if(st.capture){ e.preventDefault(); return; } if(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"," ","Shift","Escape","e","E","a","d","w","s"].includes(e.key)){ e.preventDefault(); st.keys.add(e.key); st.man=now(); } });
   cv.addEventListener("keyup",e=>{ st.keys.delete(e.key); st.man=now(); });
   cv.addEventListener("blur",()=>st.keys.clear()); }

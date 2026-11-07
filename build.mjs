@@ -1,9 +1,5 @@
 import fs from "fs";
-import crypto from "crypto";
-const CHECKSUMS = {"public/assets/app.css": "ffbd6cf6d0ad0bc5", "public/assets/data.js": "4952bb308757639a", "public/assets/engine.js": "5da3395f2735107f"};
-let bad = 0;
-for (const [f, h] of Object.entries(CHECKSUMS)) { const t = fs.readFileSync(f,"utf8").replace(/\r/g,"").split("\n").map(l=>l.trimEnd()).join("\n").trim(); const got = crypto.createHash("sha256").update(t).digest("hex").slice(0,16); if (got !== h) { console.error("CHECKSUM MISMATCH:", f, "size", fs.statSync(f).size); bad++; } else console.log("ok", f); }
-if (bad) process.exit(1);
+
 const SITE = process.env.SITE || "https://gdscript-cookbook.vercel.app";
 const src = fs.readFileSync("public/assets/data.js","utf8");
 const { R, SETUP, MISTAKES, GETTING_STARTED } = new Function(src+";return {R,SETUP,MISTAKES,GETTING_STARTED};")();

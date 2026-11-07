@@ -63,7 +63,7 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()`,
 vars:[["coyote_time","Grace period after leaving a ledge when jumping still works."],["jump_buffer","How long an early jump press is remembered before landing."],["coyote_left / buffer_left","Countdown timers. Both must be above 0 for a jump."]]},
 
-{cat:"Movement",title:"Top-down 8-way movement",node:"CharacterBody2D",
+{cat:"Top-down",title:"Top-down 8-way movement",node:"CharacterBody2D",
 desc:"Smooth acceleration and friction for top-down games, with diagonal speed normalized.",
 cap:"input × max_speed, eased by acceleration / friction",try:"Click the preview, then use the arrow keys",
 code:`extends CharacterBody2D
@@ -828,6 +828,193 @@ func _process(_delta: float) -> void:
 	if player:
 		mini_cam.global_position = player.global_position`,
 vars:[["world_2d","Sharing the main world means the minimap draws the real level, not a copy."],["zoom_out","How much more of the level the minimap shows. 4 = four times wider."],["mini_cam","Separate Camera2D inside the SubViewport that follows the player."]]}
+,
+{cat:"Top-down",title:"Grid movement (tile-based)",node:"CharacterBody2D",isNew:1,
+desc:"Moves exactly one tile per key press, like classic RPGs and puzzle games. A raycast checks the next tile first, so walls stop you before you move.",
+cap:"Tween slides one tile; RayCast2D blocks walls",try:"Click the preview, then use the arrow keys",
+ranges:{tile_size:[8,48,8],move_time:[0.05,0.6,0.01]},
+code:`extends CharacterBody2D
+
+@export var tile_size: int = 16
+@export var move_time: float = 0.15
+
+var moving := false
+@onready var ray: RayCast2D = $RayCast2D
+
+func _physics_process(_delta: float) -> void:
+	if moving:
+		return
+	var dir := Vector2.ZERO
+	if Input.is_action_pressed("ui_right"):
+		dir = Vector2.RIGHT
+	elif Input.is_action_pressed("ui_left"):
+		dir = Vector2.LEFT
+	elif Input.is_action_pressed("ui_down"):
+		dir = Vector2.DOWN
+	elif Input.is_action_pressed("ui_up"):
+		dir = Vector2.UP
+	if dir != Vector2.ZERO:
+		_try_move(dir)
+
+func _try_move(dir: Vector2) -> void:
+	ray.target_position = dir * tile_size
+	ray.force_raycast_update()
+	if ray.is_colliding():
+		return
+	moving = true
+	var t := create_tween()
+	t.tween_property(self, "position", position + dir * tile_size, move_time)
+	await t.finished
+	moving = false`,
+vars:[["tile_size","Size of one tile in pixels. Must match your TileMap."],["move_time","Seconds to slide one tile. Lower feels snappier."],["moving","Blocks new input until the current step finishes."],["force_raycast_update()","Checks the wall right now instead of waiting for the next physics frame."]]},
+
+{cat:"Top-down",title:"4-direction animation (facing)",node:"CharacterBody2D",isNew:1,
+desc:"Plays walk and idle animations for up, down, left and right, and remembers which way the character faces when it stops.",
+cap:"facing picks walk_ or idle_ + direction",try:"Click the preview, then use the arrow keys",
+ranges:{speed:[20,300,5]},
+code:`extends CharacterBody2D
+
+@export var speed: float = 120.0
+@onready var anim: AnimatedSprite2D = $AnimatedSprite2D
+
+var facing := "down"
+
+func _physics_process(_delta: float) -> void:
+	var input := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
+	velocity = input * speed
+	move_and_slide()
+
+	if input != Vector2.ZERO:
+		if absf(input.x) > absf(input.y):
+			facing = "right" if input.x > 0 else "left"
+		else:
+			facing = "down" if input.y > 0 else "up"
+		anim.play("walk_" + facing)
+	else:
+		anim.play("idle_" + facing)`,
+vars:[["facing","Last direction moved. Kept when you stop, so idle faces the right way."],["absf(input.x) > absf(input.y)","Picks the stronger axis, so diagonals choose one clear direction."],["anim.play()","Safe to call every frame; it only restarts when the name changes."]]},
+
+{cat:"Top-down",title:"Melee sword attack (hitbox)",node:"CharacterBody2D",isNew:1,
+desc:"A sword swing in the direction you face. The hitbox only turns on during the swing, so enemies get hit once per attack.",
+cap:"Hitbox enabled for attack_time, placed at facing × hitbox_offset",try:"Click to swing toward your mouse",
+ranges:{attack_damage:[1,100,1],attack_time:[0.05,1,0.05],hitbox_offset:[0,60,1]},
+code:`extends CharacterBody2D
+
+@export var attack_damage: int = 20
+@export var attack_time: float = 0.2
+@export var hitbox_offset: float = 20.0
+
+var facing := Vector2.DOWN
+var attacking := false
+@onready var hitbox: Area2D = $Hitbox
+@onready var hitbox_shape: CollisionShape2D = $Hitbox/CollisionShape2D
+
+func _ready() -> void:
+	hitbox_shape.disabled = true
+	hitbox.body_entered.connect(_on_hitbox_body_entered)
+
+func _physics_process(_delta: float) -> void:
+	var input := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
+	if input != Vector2.ZERO:
+		facing = input.normalized()
+	velocity = Vector2.ZERO if attacking else input * 150.0
+	move_and_slide()
+	if Input.is_action_just_pressed("attack") and not attacking:
+		_attack()
+
+func _attack() -> void:
+	attacking = true
+	hitbox.position = facing * hitbox_offset
+	hitbox.rotation = facing.angle()
+	hitbox_shape.disabled = false
+	await get_tree().create_timer(attack_time).timeout
+	hitbox_shape.set_deferred("disabled", true)
+	attacking = false
+
+func _on_hitbox_body_entered(body: Node2D) -> void:
+	if body.has_method("take_hit"):
+		body.take_hit(attack_damage, global_position)`,
+vars:[["attack_damage","Damage per hit."],["attack_time","How long the hitbox stays active."],["hitbox_offset","How far in front of the player the hitbox sits: the sword's reach."],["facing","Last movement direction; the swing goes this way."],["set_deferred","Turns the shape off safely after the physics step."]]},
+
+{cat:"Top-down",title:"Pathfinding (NavigationAgent2D)",node:"CharacterBody2D",isNew:1,
+desc:"An enemy that walks around walls to reach the player, using Godot's built-in navigation instead of moving in a straight line.",
+cap:"Dots = path from get_next_path_position(), recalculated every repath_time",try:"Move your mouse over the preview to set the target",
+ranges:{speed:[20,300,5],repath_time:[0.05,2,0.05]},
+code:`extends CharacterBody2D
+
+@export var speed: float = 100.0
+@export var repath_time: float = 0.25
+
+@onready var agent: NavigationAgent2D = $NavigationAgent2D
+var target: Node2D
+
+func _ready() -> void:
+	target = get_tree().get_first_node_in_group("player")
+	var t := Timer.new()
+	t.wait_time = repath_time
+	t.autostart = true
+	t.timeout.connect(_update_target)
+	add_child(t)
+
+func _update_target() -> void:
+	if target:
+		agent.target_position = target.global_position
+
+func _physics_process(_delta: float) -> void:
+	if agent.is_navigation_finished():
+		velocity = Vector2.ZERO
+	else:
+		var next := agent.get_next_path_position()
+		velocity = global_position.direction_to(next) * speed
+	move_and_slide()`,
+vars:[["repath_time","How often the path is recalculated. Lower reacts faster but costs more CPU."],["target_position","Where the agent wants to go; setting it computes a new path."],["get_next_path_position()","The next corner on the path to walk toward."],["is_navigation_finished()","True once the agent has arrived."]]},
+
+{cat:"Top-down",title:"Y-sort (walk behind objects)",node:"Sprite2D",isNew:1,
+desc:"Makes the player appear behind trees and walls when standing above them and in front when below, the core trick of every top-down game.",
+cap:"Lower on screen = drawn on top; the sort point is each node's origin",try:"Click to toggle Y Sort; drag foot_offset to see a wrong sort point",
+ranges:{foot_offset:[0,32,1]},
+code:`# The sorting itself needs no code:
+# select the parent node and turn on Ordering → Y Sort Enabled.
+
+# This script fixes the sort point of tall sprites.
+extends Sprite2D
+
+@export var foot_offset: float = 16.0
+
+func _ready() -> void:
+	# Move the art up so the node's origin sits at the feet.
+	offset.y = -foot_offset`,
+vars:[["Y Sort Enabled","Inspector setting on the parent: children lower on screen draw on top."],["foot_offset","Half the sprite's height for a centered sprite, so the origin lands at the base."],["offset","Shifts the drawing without moving the node, so sorting uses the feet."]]},
+
+{cat:"Top-down",title:"Twin-stick shooter player",node:"CharacterBody2D",isNew:1,
+desc:"Move with WASD, aim with the mouse and hold to shoot. The base of every top-down shooter.",
+cap:"Movement and aim are independent; fire_rate limits shots",try:"Click the preview, move with WASD, hold the mouse to shoot",
+ranges:{speed:[40,400,10],fire_rate:[0.03,1,0.01]},
+code:`extends CharacterBody2D
+
+const BULLET := preload("res://scenes/bullet.tscn")
+
+@export var speed: float = 200.0
+@export var fire_rate: float = 0.15
+
+var cooldown := 0.0
+@onready var gun: Node2D = $Gun
+
+func _physics_process(delta: float) -> void:
+	var input := Input.get_vector("move_left", "move_right", "move_up", "move_down")
+	velocity = input * speed
+	move_and_slide()
+
+	gun.look_at(get_global_mouse_position())
+
+	cooldown -= delta
+	if Input.is_action_pressed("shoot") and cooldown <= 0.0:
+		cooldown = fire_rate
+		var b := BULLET.instantiate()
+		b.global_position = gun.global_position
+		b.direction = Vector2.RIGHT.rotated(gun.global_rotation)
+		get_tree().current_scene.add_child(b)`,
+vars:[["speed","Movement speed in pixels per second."],["fire_rate","Seconds between shots while the button is held."],["cooldown","Counts down every frame; a shot is allowed at 0."],["gun.look_at()","Only the gun rotates, so the body can face its own way."]]}
 
 ];
 
@@ -962,6 +1149,44 @@ Object.assign(MISTAKES,{
 "Key rebinding":[["New key works but the old one still does too","action_erase_events wasn't called before adding the new event."],["Pressing the key also triggers the action instantly","Call get_viewport().set_input_as_handled() after rebinding."],["Bindings reset on restart","InputMap changes aren't saved. Store them in your save file and re-add them on load."]],
 "Day/night cycle":[["The UI goes dark too","The HUD isn't inside a CanvasLayer. CanvasModulate tints everything on the main canvas."],["Error: Invalid call 'sample' on base 'null'","No Gradient assigned. Create one in the Inspector."],["Lights don't glow at night","Use PointLight2D; plain bright sprites are tinted like everything else."]],
 "Minimap":[["Minimap is grey or empty","world_2d wasn't shared, or the SubViewport's Camera2D isn't Enabled."],["Minimap shows the HUD inside itself","The HUD is in the main world. Put UI in a CanvasLayer."],["The main camera stopped following the player","Only one camera per viewport is current. The minimap camera must live inside the SubViewport."]]
+});
+Object.assign(SETUP,{
+"Grid movement (tile-based)":{tree:`Player (CharacterBody2D)  ← attach script
+├─ Sprite2D
+├─ CollisionShape2D       ← a bit smaller than one tile
+└─ RayCast2D              ← Enabled on`,steps:["Build the player scene above, set Motion Mode to Floating and attach the script.","Make walls: a TileMapLayer whose wall tiles have physics shapes, or StaticBody2D blocks one tile in size.","Place the player on the center of a tile, e.g. position 8, 8 for 16-pixel tiles.","Set tile_size to your tile size in pixels."],run:"Press F6. Each arrow press moves exactly one tile, and walls stop you before you move."},
+"4-direction animation (facing)":{tree:`Player (CharacterBody2D)  ← attach script
+├─ AnimatedSprite2D       ← 8 animations
+└─ CollisionShape2D`,steps:["Add an AnimatedSprite2D and set Sprite Frames → New SpriteFrames.","Create 8 animations named exactly: idle_down, idle_up, idle_left, idle_right, walk_down, walk_up, walk_left, walk_right.","Fill each one with frames using the Add frames from a sprite sheet button.","Set Motion Mode to Floating and attach the script.","Only have right-facing side art? Use walk_right for both sides and add:\nanim.flip_h = facing == \"left\""],run:"Press F6 and walk in each direction. The character keeps facing the last direction when you stop."},
+"Melee sword attack (hitbox)":{tree:`Player (CharacterBody2D)  ← attach script
+├─ Sprite2D
+├─ CollisionShape2D
+└─ Hitbox (Area2D)
+   └─ CollisionShape2D    ← RectangleShape2D, the sword's reach`,steps:["Build the tree above. Size the Hitbox shape like the sword's swing area.","Select Hitbox → Collision: turn off its Layer and set Mask to the enemies' layer only.","Project Settings → Input Map: add attack and bind it to J or Left Mouse Button.","Enemies need a take_hit(amount, from_position) function, as in the Hit, knockback and invincibility frames recipe."],run:"Press F6, walk next to an enemy and press J. It takes damage once per swing."},
+"Pathfinding (NavigationAgent2D)":{tree:`Level (Node2D)
+├─ NavigationRegion2D     ← walkable area
+├─ Player                 ← in group "player"
+└─ Enemy (CharacterBody2D) ← attach script
+   ├─ Sprite2D
+   ├─ CollisionShape2D
+   └─ NavigationAgent2D`,steps:["Add a NavigationRegion2D, set Navigation Polygon → New NavigationPolygon and draw the outline of the walkable floor.","Click Bake NavigationPolygon in the toolbar so walls and obstacles are cut out.","Add a NavigationAgent2D to the enemy, set Motion Mode to Floating and attach the script.","Put the Player in group player.","Turn on Debug → Visible Navigation to see the walkable area while testing."],run:"Press F6. The enemy walks around walls to reach you instead of pushing into them."},
+"Y-sort (walk behind objects)":{tree:`World (Node2D)            ← Ordering → Y Sort Enabled
+├─ Player
+├─ Tree (Sprite2D)        ← attach script
+└─ Rock (Sprite2D)        ← attach script`,steps:["Select the parent node (World) and turn on Ordering → Y Sort Enabled in the Inspector.","Put the player and every object it can walk around inside that same parent.","Attach the script to tall sprites and set foot_offset to half the sprite's height, so their origin sits at the base.","For trees painted on a TileMapLayer: turn on Y Sort Enabled on the layer and set each tile's Y Sort Origin in the TileSet."],run:"Press F6 and walk around a tree. Above its trunk you're behind it; below it you're in front."},
+"Twin-stick shooter player":{tree:`Player (CharacterBody2D)  ← attach script
+├─ Sprite2D
+├─ CollisionShape2D
+└─ Gun (Node2D)
+   └─ Sprite2D            ← art pointing RIGHT, moved right of the origin`,steps:["Build the bullet first (Bullet with lifetime recipe) at res://scenes/bullet.tscn.","Project Settings → Input Map: add move_left (A), move_right (D), move_up (W), move_down (S) and shoot (Left Mouse Button).","Build the player tree above, set Motion Mode to Floating and attach the script.","Move the gun's Sprite2D a little to the right of the Gun node so it orbits the player when it rotates."],run:"Press F6. WASD moves, the gun follows the mouse, and holding the mouse button fires."}
+});
+Object.assign(MISTAKES,{
+"Grid movement (tile-based)":[["Player ends up between tiles","The start position isn't a tile center. Set it to tile_size / 2 plus whole tiles in the Inspector."],["Walks through walls","The RayCast2D is disabled or its Collision Mask doesn't include the walls' layer."],["Moves two tiles per press","The moving check was removed, so a new step starts mid-slide. Keep the if moving: return line."]],
+"4-direction animation (facing)":[["Error: Animation 'walk_down' doesn't exist","Animation names are case-sensitive and must match the code exactly."],["Snaps back to facing down when stopping","facing is being reset. Only change it when input isn't zero."],["Diagonals flicker between two animations","Use > (not >=) on one axis, as shown, so ties always resolve the same way."]],
+"Melee sword attack (hitbox)":[["The sword hits the player","The Hitbox Mask includes the player's layer. Tick only the enemy layer."],["Error: can't change this state while flushing queries","Shapes can't be toggled inside a collision callback. Use set_deferred(\"disabled\", true) as shown."],["Nothing gets hit","The enemy has no take_hit function, or its Collision Layer isn't in the Hitbox Mask."]],
+"Pathfinding (NavigationAgent2D)":[["Enemy doesn't move at all","The navigation map isn't ready on the first frame. Set the target from the timer as shown, not in _ready()."],["Enemy gets stuck on corners","Raise Agent Radius on the NavigationPolygon and rebake, so paths keep a gap from walls."],["Path goes straight through a wall","The polygon wasn't rebaked after moving obstacles. Click Bake NavigationPolygon again."]],
+"Y-sort (walk behind objects)":[["Player is always drawn on top","Y Sort Enabled is on the wrong node. It must be on the parent that holds both the player and the objects."],["Player goes behind a tree too early","The sort point is the sprite's center. Move the origin to the feet with foot_offset or the Offset property."],["Player's weapon or shadow sorts separately","Y-sorting applies to children too. Keep those parts as children of the player, not of the world."]],
+"Twin-stick shooter player":[["Bullets come out sideways","The gun art points up. look_at aims the +X axis, so rotate the art to point right."],["Error: The InputMap action \"move_left\" doesn't exist","Add all five actions in the Input Map; this recipe doesn't use the built-in ui_ actions."],["Fires too fast or too slow","fire_rate is seconds between shots: 0.1 is ten shots per second."]]
 });
 const GETTING_STARTED = [
  ["Install Godot","Download Godot 4 (Standard version) from godotengine.org. It's free and needs no installer: unzip and run."],
