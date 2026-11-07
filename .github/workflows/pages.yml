@@ -30,6 +30,7 @@ jobs:
           mkdir -p public/assets
           cp app.css data.js engine.js public/assets/
           cp favicon.png public/
+          cp google*.html public/ || true
           node build.mjs
           find public -name '*.html' -exec sed -i "s#href=\"/#href=\"$BASE/#g; s#src=\"/#src=\"$BASE/#g" {} +
           sed -i "s#href=\"/#href=\"$BASE/#g" public/assets/engine.js
